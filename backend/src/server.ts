@@ -1,12 +1,30 @@
 import { buildApp } from './app.js';
+import { loadDotEnv, parseEnv, type Env } from './config/env.js';
 
-const PORT = Number(process.env.PORT ?? 3000);
-const HOST = process.env.HOST ?? '127.0.0.1';
+/**
+ * Carga las variables de entorno y las valida.
+ * Si la configuracion es invalida, imprime un mensaje saneado (sin valores)
+ * y detiene el proceso antes de iniciar el servidor.
+ */
+function loadEnvOrExit(): Env {
+  try {
+    return parseEnv();
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Configuracion de entorno invalida';
+    console.error(message);
+    process.exit(1);
+  }
+}
+
+loadDotEnv();
+
+const env = loadEnvOrExit();
 
 const app = buildApp();
 
 try {
-  await app.listen({ port: PORT, host: HOST });
+  await app.listen({ port: env.PORT, host: env.HOST });
 } catch (error) {
   app.log.error(error);
   process.exit(1);
