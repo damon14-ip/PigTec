@@ -1,9 +1,9 @@
-# Sprint 1 — Consolidado hasta S5
+# Sprint 1 — Consolidado hasta S6-A
 
 > **Origen de evidencia:** reportes de ejecución de OpenCode compartidos en la conversación. Los resultados no se han vuelto a ejecutar independientemente en este entorno. Los commits y el estado remoto son los declarados por los registros de Git de OpenCode.
 
 ## Estado
-**S1–S5 completadas y publicadas según logs. Sprint 1 no se declara formalmente cerrado hasta confirmar sus criterios de cierre.** No se ha desarrollado frontend ni se han aplicado migraciones adicionales.
+**S1–S5 y S6-A completadas y publicadas según logs. Sprint 1 no se declara formalmente cerrado hasta confirmar sus criterios de cierre.** No se ha desarrollado frontend ni se han aplicado migraciones adicionales.
 
 | Tarea | Resultado | Pruebas al terminar | Commit |
 |---|---|---:|---|
@@ -12,10 +12,11 @@
 | S3 | Cliente Supabase aislado | 26/26 | `b90f892` |
 | S4 | Autenticación JWT + `/auth/me` | 52/52 | `8fe6061` |
 | S5 | Autorización RBAC + consulta de perfiles | 84/84 | `e741ebb` |
+| S6-A | Integración del repositorio de perfiles + `GET /auth/profile` | 99/99 | `3148363` |
 
 **Nota:** las cifras son totales acumulados de pruebas del backend en cada hito, no pruebas adicionales por tarea.
 
-**Commit documental previo:** `2daddf6` incorporó ocho Markdown de progreso hasta S4. **Commit de código S5:** `e741ebb`. La documentación de S5 se incorpora en un commit separado.
+**Commits documentales:** `2daddf6` (ocho Markdown hasta S4) y `2898e5a` (S5). **Commits de código:** S5 `e741ebb`; S6-A `3148363`. La documentación de S6-A se incorpora en un commit separado.
 
 ## Registro consolidado de incidencias
 | ID | Etapa | Problema | Resolución | Estado |
@@ -36,6 +37,8 @@
 | INC-014 | S5 | TS2589/TS2322: genéricos Supabase | `PromiseLike` y cast documentado en test | Resuelto en pruebas |
 | INC-015 | S5 | Error de consulta confundido con perfil inexistente | `ProfileLookupError` y HTTP 503 | Resuelto |
 | INC-016 | S5 | Tipo `Awaited<ReturnType<…>>` excesivo | Tipo explícito de resultado | Resuelto |
+| INC-017 | S6-A | `SupabaseClient` no asignable a la interfaz estrecha al cablear producción | Adaptador de tipos: cast documentado en `server.ts` | Resuelto |
+| INC-018 | S6-A | Riesgo de autorizar si `buildApp` se usa sin repositorio real | `createRejectingProfileRepository()` por defecto (503, fail-closed) | Resuelto |
 
 ## Restricciones y riesgos abiertos
 - Supabase de producción ya contiene esquema inicial, con políticas RLS incompletas; **no modificar sin autorización**.
@@ -45,7 +48,7 @@
 - Revisar y confirmar revocación del token GitHub previamente compartido.
 
 ## Próximo hito propuesto
-**S6: conexión del RBAC a rutas operativas**, tras revisar las políticas RLS reales de `profiles` y definir los endpoints. Preparar la integración con mocks, sin aplicar SQL a producción, y solicitar revisión antes de commits o cambios de base de datos.
+**S6-B: preparación de Supabase de desarrollo, aprovisionamiento de perfiles y diseño de RLS.** Verificar el proyecto real, definir la creación/asignación de perfiles y diseñar políticas RLS de tablas operativas. Sin aplicar SQL a producción y solicitando revisión antes de commits o cambios de base de datos.
 
-## Situación tras S5
-Autenticación y autorización modular listas según pruebas simuladas; RBAC todavía no conectado a endpoints operativos. Pendiente revisar RLS real, integraciones y reglas de negocio de S6.
+## Situación tras S6-A
+Autenticación y autorización modulares e integradas en el arranque real; `GET /auth/profile` operativo con RBAC y consulta de perfil vía RLS. El RBAC sigue **sin conectarse a rutas operativas** (áreas, corrales, animales, solicitudes). S6-B abordará Supabase de desarrollo, aprovisionamiento de perfiles y RLS.

@@ -16,11 +16,12 @@ Windows: `C:\Users\ACER\Desktop\UNAMBA\Fercyt\VET\PigTec` (confirmar en el equip
 - S2 `0820719`.
 - S3 `b90f892`.
 - S4 `8fe6061`.
-- Documentación hasta S4 `2daddf6`.
-- S5 `e741ebb` (RBAC modular; sin rutas operativas conectadas).
-- `GET /health` público; `GET /auth/me` requiere JWT verificado por Supabase Auth.
-- Último total reportado: 84 pruebas aprobadas, compilación y typecheck correctos.
-- No se han hecho cambios de Supabase real durante S1–S5.
+- Documentación hasta S4 `2daddf6`; documentación de S5 `2898e5a`.
+- S5 `e741ebb` (RBAC modular).
+- S6-A `3148363` (repositorio de perfiles integrado + `GET /auth/profile`).
+- `GET /health` público; `GET /auth/me` requiere JWT verificado por Supabase Auth; `GET /auth/profile` requiere JWT + rol operativo + perfil activo.
+- Último total reportado: 99 pruebas aprobadas en siete archivos, compilación y typecheck correctos.
+- No se han hecho cambios de Supabase real durante S1–S6-A.
 
 ## Reglas de negocio esenciales
 - Una sola granja: KolkaPig.
@@ -31,7 +32,7 @@ Windows: `C:\Users\ACER\Desktop\UNAMBA\Fercyt\VET\PigTec` (confirmar en el equip
 - Autenticación ≠ autorización: consultar rol/activo desde fuente confiable, aplicar backend + RLS.
 
 ## Próximo trabajo
-S5 implementada y publicada según OpenCode. **Primero versionar estos documentos de S5**, luego planificar S6. El mecanismo de roles aún no está conectado a rutas operativas; no se ha probado contra Supabase real. Antes de tocar operaciones sobre animales, revisar RLS y reglas de negocio de la especificación maestra. No aplicar migraciones ni cambiar Supabase producción sin permiso.
+S6-A implementada y publicada según OpenCode (`GET /auth/profile` con RBAC sobre `profiles`). **Siguiente fase S6-B**: preparación de un Supabase de **desarrollo**, aprovisionamiento de perfiles y diseño de RLS. El RBAC aún no está conectado a rutas operativas (áreas, corrales, animales, solicitudes) y no se ha probado contra Supabase real. No aplicar migraciones ni cambiar Supabase producción sin permiso.
 
 ## Verificaciones para reiniciar
 ```bash
@@ -45,7 +46,7 @@ npm test
 No compartir tokens, `.env` ni claves. Si el código no coincide con este documento, investigar y actualizar el registro antes de seguir.
 
 ## Texto para iniciar un nuevo chat
-«Estamos desarrollando PigTec para KolkaPig/FERCYT UNAMBA. Adjunto la especificación maestra y los Markdown de progreso. Actúa como desarrollador senior, guíame paso a paso. S1–S5 del Sprint 1 están terminadas según los reportes y GitHub; último commit `e741ebb`. Necesito continuar con S6 sin modificar Supabase producción. Primero revisa los documentos y verifica el estado antes de proponer cambios».
+«Estamos desarrollando PigTec para KolkaPig/FERCYT UNAMBA. Adjunto la especificación maestra y los Markdown de progreso. Actúa como desarrollador senior, guíame paso a paso. S1–S6-A del Sprint 1 están terminadas según los reportes y GitHub; último commit `3148363`. Necesito continuar con S6-B (Supabase de desarrollo, aprovisionamiento de perfiles y diseño de RLS) sin modificar Supabase producción. Primero revisa los documentos y verifica el estado antes de proponer cambios».
 
 ## Documentación y continuidad
-`08_SPRINT_1_S5_AUTORIZACION.md` registra el hito S5. Actualizar este archivo y el resumen tras cada tarea, y crear un commit documental separado. Antes de declarar Sprint 1 cerrado, verificar criterios de aceptación, limitaciones y riesgos.
+`08_SPRINT_1_S5_AUTORIZACION.md` y `09_SPRINT_1_S6A_INTEGRACION_PERFIL.md` registran los hitos S5 y S6-A. Actualizar este archivo y el resumen tras cada tarea, y crear un commit documental separado. Antes de declarar Sprint 1 cerrado, verificar criterios de aceptación, limitaciones y riesgos.
