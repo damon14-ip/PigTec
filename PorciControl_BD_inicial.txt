@@ -1,0 +1,235 @@
+PORCICONTROL - ESQUEMA INICIAL DE BASE DE DATOS
+PostgreSQL / Supabase | versión 0.1
+
+Decisiones aplicadas:
+1. Código visible único y permanente por animal.
+2. Una ubicación actual por animal; los movimientos se conservan como historial.
+3. No borrar animales por venta, muerte o salida: cambiar su estado y conservar la historia.
+4. Historial sanitario cronológico común, clasificado por tipo de evento.
+
+INSTRUCCIONES:
+- Ejecuta en el SQL Editor de un proyecto Supabase de pruebas.
+- Este script activa RLS. No se conceden permisos operativos generales: configura políticas RLS específicas y permisos del backend antes de conectar el frontend.
+- Los usuarios se crean en Supabase Auth y luego se asocian a profiles.
+- No se crea tabla farms porque el MVP corresponde a KolkaPig.
+- El código KOL-M-026-05 es solo un ejemplo, no una regla confirmada.
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TYPE public.user_role AS ENUM ('admin','manager','operator','veterinarian','viewer');
+CREATE TYPE public.animal_sex AS ENUM ('male','female','unknown');
+CREATE TYPE public.animal_status AS ENUM ('active','sold','dead','transferred_out','missing','inactive');
+CREATE TYPE public.location_status AS ENUM ('active','inactive');
+CREATE TYPE public.movement_reason AS ENUM ('weaning','growth_stage','fattening','breeding','health_isolation','sale','transfer','management','other');
+CREATE TYPE public.health_event_type AS ENUM ('observation','symptom_report','documented_diagnosis','treatment','vaccination','deworming','mortality','recovery','other');
+
+CREATE TABLE public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    full_name TEXT NOT NULL,
+    role public.user_role NOT NULL DEFAULT 'viewer',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE public.areas (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    status public.location_status NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE public.pens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    area_id UUID NOT NULL REFERENCES public.areas(id) ON DELETE RESTRICT,
+    code TEXT NOT NULL,
+    name TEXT,
+    capacity INTEGER CHECK (capacity IS NULL OR capacity >= 0),
+    status public.location_status NOT NULL DEFAULT 'active',
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (area_id, code)
+);
+
+CREATE TABLE public.animals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    animal_code TEXT NOT NULL UNIQUE,
+    ear_tag_code TEXT,
+    sex public.animal_sex NOT NULL DEFAULT 'unknown',
+    breed TEXT,
+    birth_date DATE,
+    origin TEXT,
+    mother_id UUID REFERENCES public.animals(id) ON DELETE RESTRICT,
+    father_id UUID REFERENCES public.animals(id) ON DELETE RESTRICT,
+    litter_id UUID,
+    current_pen_id UUID REFERENCES public.pens(id) ON DELETE RESTRICT,
+    status public.animal_status NOT NULL DEFAULT 'active',
+    entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    exit_date DATE,
+    notes TEXT,
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (id <> mother_id AND id <> father_id),
+    CHECK (exit_date IS NULL OR exit_date >= entry_date)
+);
+
+CREATE UNIQUE INDEX uq_animals_ear_tag_code
+ON public.animals (ear_tag_code)
+WHERE ear_tag_code IS NOT NULL AND btrim(ear_tag_code) <> '';
+
+CREATE TABLE public.litters (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    litter_code TEXT UNIQUE,
+    mother_id UUID REFERENCES public.animals(id) ON DELETE RESTRICT,
+    father_id UUID REFERENCES public.animals(id) ON DELETE RESTRICT,
+    birth_date DATE,
+    total_born INTEGER CHECK (total_born IS NULL OR total_born >= 0),
+    born_alive INTEGER CHECK (born_alive IS NULL OR born_alive >= 0),
+    stillborn INTEGER CHECK (stillborn IS NULL OR stillborn >= 0),
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (total_born IS NULL OR
+        ((born_alive IS NULL OR born_alive <= total_born) AND
+         (stillborn IS NULL OR stillborn <= total_born)))
+);
+
+ALTER TABLE public.animals
+ADD CONSTRAINT fk_animals_litter
+FOREIGN KEY (litter_id) REFERENCES public.litters(id) ON DELETE RESTRICT;
+
+CREATE TABLE public.animal_movements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    animal_id UUID NOT NULL REFERENCES public.animals(id) ON DELETE RESTRICT,
+    from_pen_id UUID REFERENCES public.pens(id) ON DELETE RESTRICT,
+    to_pen_id UUID REFERENCES public.pens(id) ON DELETE RESTRICT,
+    moved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    reason public.movement_reason NOT NULL DEFAULT 'other',
+    notes TEXT,
+    recorded_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (to_pen_id IS NOT NULL OR reason IN ('sale','transfer','other')),
+    CHECK (from_pen_id IS DISTINCT FROM to_pen_id)
+);
+CREATE INDEX idx_animal_movements_animal_date
+ON public.animal_movements (animal_id, moved_at DESC);
+
+CREATE TABLE public.health_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    animal_id UUID NOT NULL REFERENCES public.animals(id) ON DELETE RESTRICT,
+    event_type public.health_event_type NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    title TEXT NOT NULL,
+    description TEXT,
+    documented_by TEXT,
+    details JSONB NOT NULL DEFAULT '{}'::JSONB,
+    attachment_url TEXT,
+    recorded_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (jsonb_typeof(details) = 'object')
+);
+CREATE INDEX idx_health_events_animal_date
+ON public.health_events (animal_id, occurred_at DESC);
+CREATE INDEX idx_health_events_type_date
+ON public.health_events (event_type, occurred_at DESC);
+
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_profiles_updated_at BEFORE UPDATE ON public.profiles
+FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER trg_areas_updated_at BEFORE UPDATE ON public.areas
+FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER trg_pens_updated_at BEFORE UPDATE ON public.pens
+FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER trg_litters_updated_at BEFORE UPDATE ON public.litters
+FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER trg_animals_updated_at BEFORE UPDATE ON public.animals
+FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER trg_health_events_updated_at BEFORE UPDATE ON public.health_events
+FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE OR REPLACE FUNCTION public.apply_animal_movement()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE public.animals
+       SET current_pen_id = NEW.to_pen_id,
+           updated_at = NOW()
+     WHERE id = NEW.animal_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'No existe el animal %', NEW.animal_id;
+    END IF;
+
+    IF NEW.reason = 'sale' THEN
+        UPDATE public.animals SET status = 'sold',
+            exit_date = COALESCE(exit_date, NEW.moved_at::date),
+            current_pen_id = NULL, updated_at = NOW()
+        WHERE id = NEW.animal_id;
+    ELSIF NEW.reason = 'transfer' AND NEW.to_pen_id IS NULL THEN
+        UPDATE public.animals SET status = 'transferred_out',
+            exit_date = COALESCE(exit_date, NEW.moved_at::date),
+            current_pen_id = NULL, updated_at = NOW()
+        WHERE id = NEW.animal_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_apply_animal_movement
+AFTER INSERT ON public.animal_movements
+FOR EACH ROW EXECUTE FUNCTION public.apply_animal_movement();
+
+CREATE OR REPLACE FUNCTION public.apply_mortality_event()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.event_type = 'mortality' THEN
+        UPDATE public.animals SET status = 'dead',
+            exit_date = COALESCE(exit_date, NEW.occurred_at::date),
+            current_pen_id = NULL, updated_at = NOW()
+        WHERE id = NEW.animal_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_apply_mortality_event
+AFTER INSERT ON public.health_events
+FOR EACH ROW EXECUTE FUNCTION public.apply_mortality_event();
+
+CREATE VIEW public.v_animals_current AS
+SELECT a.id, a.animal_code, a.ear_tag_code, a.sex, a.breed, a.birth_date,
+       a.origin, a.status, a.entry_date, a.exit_date, a.current_pen_id,
+       p.code AS current_pen_code, ar.name AS current_area_name,
+       a.created_at, a.updated_at
+FROM public.animals a
+LEFT JOIN public.pens p ON p.id = a.current_pen_id
+LEFT JOIN public.areas ar ON ar.id = p.area_id;
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.areas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.litters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.animals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.animal_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.health_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY profile_select_own ON public.profiles
+FOR SELECT TO authenticated USING (id = auth.uid());
+
+-- NOTA DE SEGURIDAD:
+-- Las tablas operativas tienen RLS activado y no tienen políticas generales.
+-- Antes de usar el cliente Supabase directamente desde React, define políticas
+-- por rol para SELECT/INSERT/UPDATE. Alternativamente, accede desde un backend
+-- que valide cada permiso. Nunca expongas la clave service_role al navegador.
+-- FIN

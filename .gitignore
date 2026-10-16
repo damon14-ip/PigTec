@@ -1,0 +1,26 @@
+﻿# Dependencias
+node_modules/
+
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Compilacion y cobertura
+dist/
+build/
+coverage/
+
+# Registros
+*.log
+npm-debug.log*
+
+# Sistemas operativos y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Archivos temporales
+*.tmp
+*.temp
