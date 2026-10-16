@@ -5,6 +5,10 @@ import {
   createRejectingTokenVerifier,
   type TokenVerifier,
 } from './modules/auth/token-verifier.js';
+import {
+  createRejectingProfileRepository,
+  type ProfileRepository,
+} from './modules/auth/profile-repository.js';
 
 export interface BuildAppOptions {
   logger?: boolean;
@@ -14,6 +18,12 @@ export interface BuildAppOptions {
    * autenticada sin un verificador real inyectado.
    */
   tokenVerifier?: TokenVerifier;
+  /**
+   * Repositorio de perfiles para la autorizacion por rol. Si se omite, se usa
+   * uno que no puede comprobar ningun perfil (fail-closed): las rutas que
+   * requieren rol responden 503 en lugar de autorizar.
+   */
+  profileRepository?: ProfileRepository;
 }
 
 /**
@@ -26,9 +36,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   const tokenVerifier = options.tokenVerifier ?? createRejectingTokenVerifier();
+  const profileRepository =
+    options.profileRepository ?? createRejectingProfileRepository();
 
   app.register(healthRoutes);
-  app.register(authRoutes, { verifier: tokenVerifier });
+  app.register(authRoutes, { verifier: tokenVerifier, profileRepository });
 
   return app;
 }

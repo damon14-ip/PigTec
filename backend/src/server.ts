@@ -1,6 +1,10 @@
 import { buildApp } from './app.js';
 import { loadDotEnv, parseEnv, type Env } from './config/env.js';
 import { createSupabaseTokenVerifier } from './modules/auth/token-verifier.js';
+import {
+  createSupabaseProfileRepository,
+  type SupabaseProfileClient,
+} from './modules/auth/profile-repository.js';
 import { createSupabaseClient } from './supabase/client.js';
 
 /**
@@ -28,7 +32,18 @@ const env = loadEnvOrExit();
 // JWT ocurre solo al atender `GET /auth/me`.
 const tokenVerifier = createSupabaseTokenVerifier(createSupabaseClient(env));
 
-const app = buildApp({ tokenVerifier });
+// Repositorio de perfiles: se crea un cliente NUEVO por solicitud con el JWT
+// verificado de esa solicitud (RLS con identidad del usuario). Nunca se usa
+// `service_role` ni se comparte un JWT mutable entre peticiones.
+//
+// El cast a `SupabaseProfileClient` aisla el limite de tipos: supabase-js expone
+// genericos muy profundos que TypeScript no compara estructuralmente, pero en
+// tiempo de ejecucion la cadena from().select().eq().maybeSingle() es la misma.
+const profileRepository = createSupabaseProfileRepository((accessToken) =>
+  createSupabaseClient(env, { accessToken }) as unknown as SupabaseProfileClient,
+);
+
+const app = buildApp({ tokenVerifier, profileRepository });
 
 try {
   await app.listen({ port: env.PORT, host: env.HOST });

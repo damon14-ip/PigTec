@@ -143,3 +143,18 @@ export function createSupabaseProfileRepository(
     },
   };
 }
+
+/**
+ * Repositorio por defecto: no puede comprobar ningun perfil (fail-closed).
+ *
+ * Evita que un backend sin repositorio real cableado autorice peticiones. Lanza
+ * `ProfileLookupError`, de modo que la autorizacion responde 503 en lugar de
+ * conceder acceso. `server.ts` debe inyectar el repositorio real.
+ */
+export function createRejectingProfileRepository(): ProfileRepository {
+  return {
+    async findProfileById(): Promise<UserProfile | null> {
+      throw new ProfileLookupError();
+    },
+  };
+}
