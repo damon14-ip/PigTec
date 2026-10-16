@@ -1,5 +1,7 @@
 import { buildApp } from './app.js';
 import { loadDotEnv, parseEnv, type Env } from './config/env.js';
+import { createSupabaseTokenVerifier } from './modules/auth/token-verifier.js';
+import { createSupabaseClient } from './supabase/client.js';
 
 /**
  * Carga las variables de entorno y las valida.
@@ -21,7 +23,12 @@ loadDotEnv();
 
 const env = loadEnvOrExit();
 
-const app = buildApp();
+// Cliente de verificacion: anon, SIN `accessToken`, independiente de los
+// clientes por usuario. Crear el cliente no abre conexiones; la validacion del
+// JWT ocurre solo al atender `GET /auth/me`.
+const tokenVerifier = createSupabaseTokenVerifier(createSupabaseClient(env));
+
+const app = buildApp({ tokenVerifier });
 
 try {
   await app.listen({ port: env.PORT, host: env.HOST });
