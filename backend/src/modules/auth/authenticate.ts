@@ -9,6 +9,14 @@ declare module 'fastify' {
   interface FastifyRequest {
     /** Identidad autenticada; la define el preHandler `createAuthenticate`. */
     authUser?: AuthenticatedUser;
+    /**
+     * Token de acceso YA verificado de esta peticion.
+     *
+     * Se guarda solo en el servidor para que la autorizacion (S5) pueda consultar
+     * `profiles` con la identidad del usuario y RLS. Nunca se incluye en las
+     * respuestas ni se comparte entre peticiones.
+     */
+    authToken?: string;
   }
 }
 
@@ -69,6 +77,9 @@ export function createAuthenticate(
     if (token) {
       try {
         request.authUser = await verifier.verify(token);
+        // El token solo se guarda tras verificarse correctamente, para que la
+        // autorizacion posterior lo use como identidad en la consulta a RLS.
+        request.authToken = token;
         return;
       } catch {
         // Cualquier fallo de verificacion se trata como no autenticado.
