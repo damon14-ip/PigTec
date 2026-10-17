@@ -184,11 +184,360 @@ reglas de negocio o seguridad) y **no semánticas** (empaquetado/ejecución).
   origen y se determinó que era desconocido". No se debe colapsar NULL en
   `'unknown'` de forma automática.
 
-## Reservado para migraciones posteriores (NO incluido en 001)
+## 002_profile_provisioning.sql — propuesta (NO ejecutada)
+
+**Depende de:** `001_initial_schema.sql` ya aplicada (`public.profiles` y
+`profile_select_own`). **Estado:** revisada (S6-C) y pendiente de **aprobación** y
+ejecución.
+
+> **Alcance de las conclusiones:** las afirmaciones de seguridad y concurrencia
+> de esta sección provienen de **revisión estática** del SQL; **no** se han
+> ejecutado pruebas funcionales ni de concurrencia en PostgreSQL/Supabase.
+
+### Objetivo
+
+Que todo usuario de Supabase Auth tenga un **perfil sin privilegios**
+(`role='viewer'`, `is_active=false`) y que **solo un administrador activo** pueda
+asignar rol y estado, con **auditoría persistente**. Modelo interno de KolkaPig:
+**sin registro público**.
+
+### Objetos que crea
+
+| Objeto | Tipo | Notas |
+|---|---|---|
+| `public.profile_access_audit` | tabla | Auditoría de cambios de rol/estado. |
+| `idx_profile_access_audit_profile` | índice | Búsqueda por usuario y fecha. |
+| `profile_access_audit_select_admin` | política RLS | `SELECT` solo a **administradores activos**; sin políticas de escritura. |
+| `public.handle_new_user()` | función (trigger) | `SECURITY DEFINER`, `search_path=''`; crea el perfil `viewer`/inactivo. |
+| `on_auth_user_created` | trigger | `AFTER INSERT ON auth.users`. |
+| `public.admin_set_profile_access(uuid, user_role, boolean)` | RPC | `SECURITY DEFINER`, `search_path=''`; solo admin activo; audita. |
+
+Además ajusta **privilegios revisados** (no solo tablas): `PUBLIC` y `anon` sin
+acceso a `profiles`/auditoría; `authenticated` **solo `SELECT`** en ambas (la
+auditoría, además, **sujeta a RLS**); `EXECUTE` de las funciones restringido (la
+RPC solo a `authenticated`; la función de trigger a nadie); **la secuencia de
+identidad** de la auditoría se revoca a `PUBLIC`/`anon`/`authenticated`; y el
+**esquema `public`** se blinda contra `CREATE` (conservando `USAGE`, necesario
+para PostgREST).
+
+La RPC usa además un **bloqueo global transaccional** (`pg_advisory_xact_lock`
+con una clave fija de PigTec) para serializar toda la gestión de roles. **No crea
+objetos persistentes** (no es tabla, ni secuencia, ni función adicional).
+
+### Arquitectura (resumen)
+
+1. **Alta de usuario** → trigger crea perfil `viewer`/`is_active=false`
+   (idempotente con `ON CONFLICT (id) DO NOTHING`). No se deriva el rol de
+   `raw_user_meta_data`; solo el `full_name` visible.
+   - **Usuarios preexistentes** (en `auth.users` antes de instalar el trigger):
+     la migración **detecta los perfiles faltantes y los crea** con la misma
+     regla `viewer`/inactivo. **No** asigna roles operativos ni activa cuentas;
+     requieren una acción explícita del administrador.
+2. **Usuario inerte**: `GET /auth/profile` → 403.
+3. **Asignación de rol/estado** → solo por `admin_set_profile_access`, que:
+   - exige admin **activo** (rol leído de `profiles`, no del JWT); tras bloquear a
+     los administradores **revalida al llamante con valores vigentes**, de modo
+     que si fue desactivado o degradado por otra transacción **no opera**;
+   - valida parámetros y **rechaza activar un `viewer`** (`viewer` ⇒
+     `is_active=false` obligatorio);
+   - rechaza perfiles inexistentes; impide la **autogestión**;
+   - si el rol y el estado pedidos **coinciden** con los actuales, es **no-op**
+     (ni `UPDATE` ni auditoría);
+   - **protege al último admin activo** (conteo vigente tras el bloqueo);
+   - serializa con un **bloqueo global transaccional**
+     (`pg_advisory_xact_lock`, clave fija de PigTec) tomado antes de cualquier
+     bloqueo de fila; además bloquea las filas de los admins activos
+     (`ORDER BY id FOR UPDATE`) como defensa en profundidad;
+   - registra auditoría `old → new` en la misma transacción.
+4. **Sin escrituras directas**: `profiles` y la auditoría no tienen políticas de
+   escritura y se revocan `INSERT/UPDATE/DELETE` al rol `authenticated`; la
+   secuencia de la auditoría y el `CREATE` del esquema también quedan revocados.
+
+### Concurrencia y exclusión mutua (READ COMMITTED)
+
+La RPC corre bajo PostgreSQL **READ COMMITTED**. Para evitar carreras al cambiar
+roles/estados se combinan dos mecanismos:
+
+1. **Bloqueo global transaccional** `pg_advisory_xact_lock(<clave fija>)`, tomado
+   **antes de cualquier bloqueo de fila** y liberado automáticamente en
+   `COMMIT`/`ROLLBACK`. Está diseñado para que **solo una** gestión de roles corra
+   a la vez, exista o no algún administrador activo.
+2. **Bloqueo de filas** de los admins activos en **orden estable por `id`**
+   (`ORDER BY id FOR UPDATE`), más la relectura del llamante y el bloqueo del
+   destino. Aporta valores vigentes y protege frente a SQL directo privilegiado.
+
+Conclusiones del **análisis estático** (pendientes de prueba funcional en
+PostgreSQL; **no** se han ejecutado pruebas de concurrencia reales):
+
+- **Dos admins que intentan degradar/desactivar al otro a la vez**: uno toma el
+  bloqueo global y el otro espera; al continuar, el segundo **relee su propio
+  estado** y, si perdió privilegios, **aborta** (`42501`). No debería quedar el
+  sistema con cero admins activos.
+- **Un admin pierde privilegios mientras otra transacción espera bloqueos**: al
+  adquirir el bloqueo se **relee** su rol/estado; si ya no es admin activo →
+  `no autorizado`.
+- **Promoción concurrente de nuevos admins**: queda serializada por el bloqueo
+  global; el conteo del último admin se calcula sobre un conjunto estable.
+- **Deadlocks**: el orden de bloqueo es uniforme
+  (`global → admins por id → llamante → destino`); no se identificaron esperas
+  cruzadas entre RPC en el análisis.
+
+El patrón aislado `SELECT ... ORDER BY id FOR UPDATE` sobre los admins activos
+**ya** debería serializar entre RPC (todas bloquean el mismo conjunto no vacío);
+el bloqueo global lo hace **explícito y más fácil de razonar**, sin depender de
+detalles finos de READ COMMITTED/EPQ. Frente a cambios por **SQL directo
+privilegiado** (fuera de la RPC) no hay exclusión total; por eso se revocan,
+además, las escrituras directas de `authenticated`.
+
+### Seguridad (`SECURITY DEFINER`)
+
+- Solo dos funciones son `SECURITY DEFINER`, ambas con `SET search_path = ''` y
+  referencias **totalmente calificadas** (`public.*`, `auth.*`, `pg_catalog.*`).
+- Propietario = rol de la migración (`postgres`, con `BYPASSRLS`): imprescindible
+  para escribir con RLS activo y sin políticas de escritura. **No transferir la
+  propiedad** a un rol menor.
+- `EXECUTE`: revocado a `PUBLIC`/`anon`; la RPC solo a `authenticated`.
+- No se usa `service_role` en ningún punto.
+- **Sin vector de escalamiento identificado (revisión estática)**: `authenticated`
+  puede *invocar* la RPC, pero la autorización se resuelve **dentro** de la función
+  contra `profiles` (no contra el JWT) y exige admin **activo**; además se bloquea
+  la autogestión. Un usuario no admin solo obtiene `42501`.
+- `auth.uid()` proviene del JWT **firmado** por Supabase (PostgREST), que el
+  cliente no puede falsificar. `search_path=''` + `REVOKE CREATE ON SCHEMA public`
+  están pensados para impedir el secuestro de resolución de nombres.
+- `handle_new_user()` retorna `trigger` y su `EXECUTE` queda revocado: no es
+  invocable como RPC; aun si lo fuera, solo inserta un perfil `viewer`/inactivo.
+- Estas afirmaciones son **conclusiones de revisión estática**, no de pruebas
+  ejecutadas en PostgreSQL/Supabase.
+
+### Privacidad (PII) y conservación
+
+`public.profile_access_audit` almacena **identificadores personales**
+(`profile_id`, `actor_id`) y **correos electrónicos** (`actor_email`,
+`target_email`). El acceso es de **solo lectura** y limitado a **administradores
+activos** (política RLS). La **política de conservación** (plazo de retención y
+anonimización) está **pendiente de aprobación**; hasta entonces, no debe
+exportarse ni compartirse fuera del entorno de desarrollo.
+
+### Ajuste manual independiente (NO es SQL)
+
+Desactivar el **registro público** en Supabase Auth (Dashboard → Authentication)
+y verificarlo manualmente antes de crear cuentas. El SQL no puede garantizarlo.
+
+### Primer administrador (bootstrap manual y auditable)
+
+**No se introducen funciones públicas que permitan reclamar `admin`.** El
+bootstrap lo ejecuta el responsable con acceso directo de propietario, **una sola
+vez** y **en una sola transacción**, de modo que el cambio y su registro en
+`profile_access_audit` sean **atómicos**. El bloque exacto está en la cabecera de
+`002_profile_provisioning.sql` (paso manual 2):
+
+1. Verificar PigTecBD en el Dashboard y desactivar el registro público.
+2. Crear el usuario admin (email + contraseña) en el Dashboard; el trigger deja su
+   perfil `viewer`/inactivo. Anotar su UUID.
+3. Ejecutar el bloque `BEGIN; … DO $bootstrap$ … $bootstrap$; … COMMIT;` que:
+   - toma el **mismo bloqueo global** que la RPC (no colisiona con ella);
+   - rechaza la ejecución si el perfil **ya es** admin activo, si **ya existe**
+     otro admin activo, o si el bootstrap **ya se ejecutó** antes (4 guardas);
+   - captura el estado previo, hace el `UPDATE` a `role='admin', is_active=TRUE`
+     e **inserta el evento inicial** (`actor = el propio perfil`, `actor_email =
+     '(bootstrap manual)'`) en la misma transacción.
+4. Verificar con `GET /auth/profile` → 200 con `role=admin`.
+
+Por las guardas, según la **revisión estática**, el bootstrap solo debería
+ejecutarse una vez y no debería crear varios administradores raíz (pendiente de
+prueba funcional). Sin credenciales incrustadas y sin ningún camino desde el
+registro público.
+
+### Verificación (solo lectura, tras aplicar)
+
+```sql
+-- Objetos de 002
+SELECT to_regclass('public.profile_access_audit');
+SELECT proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND proname IN ('handle_new_user','admin_set_profile_access');
+
+-- Trigger sobre auth.users
+SELECT t.tgname FROM pg_trigger t
+JOIN pg_class c ON c.oid = t.tgrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'auth' AND t.tgname = 'on_auth_user_created' AND NOT t.tgisinternal;
+
+-- RLS activado en la auditoría (la política se consulta más abajo)
+SELECT relrowsecurity FROM pg_class WHERE oid = 'public.profile_access_audit'::regclass;
+
+-- Privilegios: authenticated sin escritura en profiles; PUBLIC/anon sin acceso
+SELECT grantee, privilege_type FROM information_schema.role_table_grants
+WHERE table_schema = 'public' AND table_name = 'profiles'
+ORDER BY 1, 2;
+
+-- EXECUTE de las funciones (esperado: RPC true solo para authenticated; trigger false)
+SELECT has_function_privilege('authenticated',
+  'public.admin_set_profile_access(uuid, public.user_role, boolean)', 'EXECUTE') AS rpc_auth,
+       has_function_privilege('anon',
+  'public.admin_set_profile_access(uuid, public.user_role, boolean)', 'EXECUTE') AS rpc_anon,
+       has_function_privilege('authenticated',
+  'public.handle_new_user()', 'EXECUTE') AS trigger_auth;
+
+-- Secuencia de la auditoría: sin USAGE para PUBLIC/anon/authenticated
+SELECT c.relname,
+       has_sequence_privilege('anon', c.oid, 'USAGE') AS anon_usage,
+       has_sequence_privilege('authenticated', c.oid, 'USAGE') AS auth_usage
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND c.relkind = 'S'
+  AND c.relname = 'profile_access_audit_id_seq';
+
+-- Esquema: CREATE revocado
+SELECT has_schema_privilege('anon', 'public', 'CREATE') AS anon_create,
+       has_schema_privilege('authenticated', 'public', 'CREATE') AS auth_create;
+
+-- La RPC incorpora el bloqueo global transaccional (verificación del cuerpo)
+SELECT prosrc ILIKE '%pg_advisory_xact_lock%' AS usa_bloqueo_global
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public' AND p.proname = 'admin_set_profile_access';
+
+-- Política RLS de la auditoría (SELECT solo a authenticated)
+SELECT policyname, cmd, roles FROM pg_policies
+WHERE schemaname = 'public' AND tablename = 'profile_access_audit';
+
+-- Privilegios de la auditoría: solo SELECT para authenticated; PUBLIC/anon sin nada
+SELECT grantee, privilege_type FROM information_schema.role_table_grants
+WHERE table_schema = 'public' AND table_name = 'profile_access_audit'
+ORDER BY 1, 2;
+
+-- Usuarios anteriores sin perfil (esperado: 0)
+SELECT count(*) AS usuarios_sin_perfil
+FROM auth.users u
+LEFT JOIN public.profiles p ON p.id = u.id
+WHERE p.id IS NULL;
+```
+
+### Escenarios de prueba (usuarios/ datos SINTÉTICOS, solo PigTecBD)
+
+**Aprovisionamiento y acceso**
+1. Alta de usuario → perfil `viewer`/`is_active=false`, `full_name` no vacío.
+2. Idempotencia: perfil preexistente + alta → sin duplicado ni error.
+3. `GET /auth/profile`: `viewer`/inactivo → 403; tras asignación → 200.
+4. Catálogo `viewer` del JWT vs `profiles`: el rol se lee de la base, no del token.
+   - **Usuarios preexistentes**: tras aplicar 002, ninguna cuenta de `auth.users`
+     queda sin perfil; las creadas por el *backfill* son `viewer`/inactivo.
+
+**Autorización y validación**
+5. RPC por **no-admin** (operator/veterinarian/viewer) → error `42501` (403).
+6. RPC **sin sesión** → error `28000`.
+7. RPC con `new_role='viewer'` y `new_is_active=true` → **rechazada** (`viewer`
+   nunca activo).
+8. RPC con parámetros nulos → error `22004`.
+9. **Perfil inexistente** → error `P0002`.
+10. **Autogestión** (admin sobre sí mismo) → rechazada.
+
+**Reglas y auditoría**
+11. RPC por **admin** → aplica y crea **1 fila** de auditoría con `old/new`.
+12. **No-op** (mismos rol y estado) → **sin** `UPDATE` y **sin** fila de auditoría.
+13. **Último admin activo** (degradarlo/desactivarlo) → rechazado.
+14. **Bootstrap inicial** → existe **1 fila** de auditoría con
+    `actor_email='(bootstrap manual)'` y `old_role/new_role` coherentes; una
+    **segunda ejecución** del bloque es **rechazada** (guardas: admin existente /
+    bootstrap previo).
+
+**Concurrencia y degradación**
+15. **Concurrencia de administradores**: dos sesiones intentan degradar/desactivar
+    a los dos últimos admins a la vez → solo una procede; la otra es rechazada
+    (queda ≥ 1 admin activo).
+16. **Degradación del llamante**: mientras una sesión A ejecuta la RPC, otra
+    transacción desactiva/degrada al admin A → A **no opera** (revalidación
+    vigente tras el bloqueo).
+
+**Aislamiento y datos**
+17. Escritura directa (`UPDATE profiles SET role=...` como `authenticated`) →
+    rechazada por privilegios/RLS; `nextval` de la secuencia → denegado.
+18. Lectura de auditoría por **no-admin** → 0 filas; por **admin activo** → filas.
+19. **Borrado de cuenta** → perfil eliminado en cascada; **auditoría conservada**.
+
+*(No se ejecuta ninguna de estas pruebas contra Supabase en esta tarea.)*
+
+### Reversión
+
+Hay **dos procedimientos separados** según si existe auditoría que conservar. En
+ambos se mantiene una **postura restrictiva**: **no** se concede nada a `anon` ni
+escrituras directas a `authenticated`.
+
+#### Opción A — Desarrollo, sin datos de auditoría (nada que conservar)
+
+Solo si `profile_access_audit` está **vacía** y **no** hay que conservarla. La
+comprobación se hace **dentro de la misma transacción** que el `DROP`, con un
+bloqueo exclusivo, para que no se cuele un registro entre la comprobación y el
+borrado. Si hay filas, **aborta sin borrar nada**:
+
+```sql
+BEGIN;
+-- Bloqueo exclusivo: impide inserciones concurrentes durante comprobación + DROP.
+LOCK TABLE public.profile_access_audit IN ACCESS EXCLUSIVE MODE;
+
+-- Guarda atómica: si hay registros, aborta (no se borra nada).
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM public.profile_access_audit) THEN
+        RAISE EXCEPTION
+            'Reversion A abortada: profile_access_audit contiene registros. Use la Opcion B (conservar auditoria).';
+    END IF;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.admin_set_profile_access(UUID, public.user_role, BOOLEAN);
+DROP FUNCTION IF EXISTS public.handle_new_user();
+DROP TABLE IF EXISTS public.profile_access_audit;   -- se pierde tabla/índice/secuencia
+-- Postura RESTRICTIVA: no se abren escrituras ni se concede nada a anon.
+REVOKE ALL ON public.profiles FROM anon;
+REVOKE INSERT, UPDATE, DELETE ON public.profiles FROM authenticated;
+COMMIT;
+```
+
+Nota: si `profile_access_audit` no existe (002 nunca aplicada), `LOCK TABLE`
+falla; en ese caso no hay nada que revertir.
+
+#### Opción B — Conservando la auditoría existente (recomendada si hay filas)
+
+**No se elimina ningún registro de auditoría sin autorización explícita.** Primero
+**exportar/inspeccionar** la auditoría (contiene PII):
+
+```sql
+SELECT * FROM public.profile_access_audit ORDER BY changed_at;   -- exportar/copiar
+```
+
+```sql
+BEGIN;
+-- Se eliminan SOLO trigger y funciones. La tabla de auditoría SE CONSERVA
+-- (con sus datos, su RLS y sus privilegios restrictivos intactos).
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.admin_set_profile_access(UUID, public.user_role, BOOLEAN);
+DROP FUNCTION IF EXISTS public.handle_new_user();
+-- Postura RESTRICTIVA: no se abren escrituras ni se concede nada a anon.
+REVOKE ALL ON public.profiles FROM anon;
+REVOKE INSERT, UPDATE, DELETE ON public.profiles FROM authenticated;
+COMMIT;
+```
+
+#### Dependencias y consecuencias
+
+- **Opción A**: aborta si hay registros (guarda atómica + `LOCK ... ACCESS
+  EXCLUSIVE`). Solo si está vacía procede a borrar la tabla; eliminar datos (PII)
+  es **irreversible** y **requiere autorización explícita**.
+- **Opción B**: deja la tabla de auditoría **huérfana** (sin escritor) pero
+  **legible** por admins activos; sus datos se **preservan**.
+- En **ambos** casos, `profiles` conserva `viewer`/inactivo y **no habrá forma de
+  asignar roles** hasta reimplantar 002 o un equivalente (intencional).
+- La vista `v_animals_current` y el resto de objetos de 001 **no** se tocan.
+- La clave de bloqueo global (`pg_advisory_xact_lock`) se libera sola al terminar
+  las transacciones; no requiere limpieza.
+
+## Reservado para migraciones posteriores (003+)
 
 | Migración propuesta | Contenido | Motivo |
 |---|---|---|
-| 002 | **Aprovisionamiento de perfiles**: trigger en `auth.users` o flujo administrado; asignación de rol explícita (evitar que quede `viewer`). | Requiere decisión de seguridad y pruebas. |
 | 003 | **Políticas RLS operativas** por rol + privilegios de columna; ajuste definitivo de privilegios de la vista. | Requiere diseño y pruebas por acción, no solo por tabla. |
 | 004 | Revisión adicional de la vista y de `set_updated_at` (`search_path`). | Endurecimiento. |
 | 005 | **Endurecer `apply_animal_movement` / `apply_mortality_event`**: `search_path`, coherencia de estado, bloqueo de movimientos tras venta/muerte/salida, idempotencia. | Reglas de negocio sensibles. |
@@ -233,7 +582,7 @@ WHERE n.nspname = 'public'
 SELECT to_regclass('auth.users');
 ```
 
-### Después de aplicar (solo lectura)
+### Después de aplicar 001 (solo lectura)
 
 ```sql
 -- 7 tablas
@@ -287,9 +636,15 @@ SELECT relname, relrowsecurity FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY 1;
 
--- Única política esperada: profile_select_own
+-- Única política esperada tras 001: profile_select_own
 SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public';
 ```
+
+> **Alcance de este bloque**: los recuentos anteriores corresponden al estado
+> **tras aplicar solo 001**. Tras aplicar **002** se suman: **+1 tabla**
+> (`profile_access_audit`), **+1 índice**, **+2 funciones**, **+1 trigger** (en
+> `auth.users`, **no** en `public`) y **+1 política RLS**. Los ENUM, CHECK y FK no
+> cambian. La verificación de 002 está en su propia sección («Verificación»).
 
 ### Pruebas funcionales
 
@@ -303,5 +658,12 @@ Corregir el script y volver a ejecutar desde una base limpia.
 
 ## Estado
 
-`001_initial_schema.sql` es una **propuesta corregida**. No se ha ejecutado ni
-conectado a ningún proyecto Supabase.
+- `001_initial_schema.sql`: **ejecutada** manualmente por el usuario en el
+  proyecto de desarrollo **PigTecBD** y con **estructura verificada** (S6-B).
+- `002_profile_provisioning.sql`: **propuesta revisada (S6-C), NO ejecutada**.
+  Incorpora bloqueo global transaccional, reglas de rol/estado, creación de
+  perfiles para **usuarios preexistentes** (viewer/inactivo), reversión en dos
+  opciones y bootstrap auditable. Las conclusiones son de **revisión estática**;
+  **faltan pruebas funcionales en PostgreSQL**. Requiere **aprobación explícita**
+  antes de aplicarla en PigTecBD. No se ha conectado a Supabase ni se ha
+  ejecutado SQL.
