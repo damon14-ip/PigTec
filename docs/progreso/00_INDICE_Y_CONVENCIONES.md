@@ -5,9 +5,10 @@ Permitir que el usuario, otro chat de ChatGPT o OpenCode retomen el proyecto sin
 
 ## Nomenclatura
 - **Etapa 0**: preparación y línea base.
-- **Sprint 1**: base técnica, compuesto hasta ahora por **S1** (Fastify), **S2** (entorno), **S3** (cliente Supabase), **S4** (autenticación), **S5** (autorización), **S6-A** (integración del perfil autenticado). Son **tareas del mismo sprint**, no seis sprints distintos.
+- **Sprint 1**: base técnica, compuesto hasta ahora por **S1** (Fastify), **S2** (entorno), **S3** (cliente Supabase), **S4** (autenticación), **S5** (autorización), **S6-A** (integración del perfil autenticado) y **S6-B** (migración inicial de base de datos en el Supabase de desarrollo). Son **tareas del mismo sprint**, no seis sprints distintos.
 - **S5**: autorización por roles; implementada y publicada según OpenCode.
-- **S6-A**: integración del repositorio de perfiles y `GET /auth/profile`; implementada y publicada. **S6-B** (Supabase de desarrollo, aprovisionamiento de perfiles y diseño de RLS) está pendiente.
+- **S6-A**: integración del repositorio de perfiles y `GET /auth/profile`; implementada y publicada.
+- **S6-B**: migración inicial `001_initial_schema.sql` **ejecutada manualmente por el usuario** en PigTecBD (desarrollo) y **estructura verificada**. **El aprovisionamiento de perfiles, el diseño de RLS operativas y las pruebas funcionales siguen pendientes.**
 
 ## Archivos
 - `01_ETAPA_0_PREPARACION.md`: línea base Git y arquitectura.
@@ -17,6 +18,7 @@ Permitir que el usuario, otro chat de ChatGPT o OpenCode retomen el proyecto sin
 - `05_SPRINT_1_S4_AUTENTICACION.md`: autenticación JWT.
 - `08_SPRINT_1_S5_AUTORIZACION.md`: implementación RBAC, pruebas, errores y soluciones.
 - `09_SPRINT_1_S6A_INTEGRACION_PERFIL.md`: integración del repositorio de perfiles y `GET /auth/profile`.
+- `10_SPRINT_1_S6B_MIGRACION_INICIAL.md`: migración 001 (preparación, ejecución, verificaciones de estructura y límites).
 - `06_SPRINT_1_RESUMEN_Y_ERRORES.md`: consolidado, incidencias y próximos pasos.
 - `07_CONTINUIDAD_PARA_NUEVO_CHAT_Y_OPENCODE.md`: instrucciones de recuperación.
 
