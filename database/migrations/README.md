@@ -184,11 +184,12 @@ reglas de negocio o seguridad) y **no semánticas** (empaquetado/ejecución).
   origen y se determinó que era desconocido". No se debe colapsar NULL en
   `'unknown'` de forma automática.
 
-## 002_profile_provisioning.sql — propuesta (NO ejecutada)
+## 002_profile_provisioning.sql — ejecutada (S6-C/S6-D)
 
 **Depende de:** `001_initial_schema.sql` ya aplicada (`public.profiles` y
-`profile_select_own`). **Estado:** revisada (S6-C) y pendiente de **aprobación** y
-ejecución.
+`profile_select_own`). **Estado:** **aplicada en PigTecBD y validada
+funcionalmente** (la RPC de administración de perfiles respondió HTTP 204 al
+activar y restaurar un usuario de prueba).
 
 > **Alcance de las conclusiones:** las afirmaciones de seguridad y concurrencia
 > de esta sección provienen de **revisión estática** del SQL; **no** se han
@@ -660,10 +661,12 @@ Corregir el script y volver a ejecutar desde una base limpia.
 
 - `001_initial_schema.sql`: **ejecutada** manualmente por el usuario en el
   proyecto de desarrollo **PigTecBD** y con **estructura verificada** (S6-B).
-- `002_profile_provisioning.sql`: **propuesta revisada (S6-C), NO ejecutada**.
-  Incorpora bloqueo global transaccional, reglas de rol/estado, creación de
-  perfiles para **usuarios preexistentes** (viewer/inactivo), reversión en dos
-  opciones y bootstrap auditable. Las conclusiones son de **revisión estática**;
-  **faltan pruebas funcionales en PostgreSQL**. Requiere **aprobación explícita**
-  antes de aplicarla en PigTecBD. No se ha conectado a Supabase ni se ha
-  ejecutado SQL.
+- `002_profile_provisioning.sql`: **ejecutada** en PigTecBD y **validada
+  funcionalmente** (S6-D): la RPC `admin_set_profile_access` respondió HTTP 204
+  al activar y restaurar un usuario de prueba, con auditoría coherente.
+- `003_areas_pens_rls.sql`: **ejecutada** en PigTecBD; verificado que existen sus
+  **6 políticas RLS** (3 en `areas`, 3 en `pens`). Habilita `SELECT` para roles
+  operativos activos e `INSERT`/`UPDATE` para admin/manager activos; sin `DELETE`
+  y sin acceso anónimo.
+- La aplicación en Supabase de 001, 002 y 003 la realizó el responsable del
+  proyecto en el SQL Editor; el asistente no se conecta a Supabase ni ejecuta SQL.

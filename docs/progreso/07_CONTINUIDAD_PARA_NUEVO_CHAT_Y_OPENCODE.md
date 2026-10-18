@@ -21,8 +21,16 @@ Windows: `C:\Users\ACER\Desktop\UNAMBA\Fercyt\VET\PigTec` (confirmar en el equip
 - S6-A `3148363` (repositorio de perfiles integrado + `GET /auth/profile`).
 - S6-B: migración inicial `86d430b` (`database/migrations/001_initial_schema.sql` + README), **ejecutada manualmente en PigTecBD (desarrollo)**; estructura verificada (7 tablas, vista `v_animals_current` con `security_invoker=true`, 8 triggers, RLS en 7 tablas, política única `profile_select_own`). PostgreSQL 17.11, `auth.users` disponible.
 - `GET /health` público; `GET /auth/me` requiere JWT verificado por Supabase Auth; `GET /auth/profile` requiere JWT + rol operativo + perfil activo.
-- Último total reportado: 99 pruebas aprobadas en siete archivos, compilación y typecheck correctos.
-- S1–S6-A no modificaron Supabase. En S6-B **sí** se aplicó la migración 001 al proyecto de **desarrollo** (PigTecBD); el proyecto anterior (pruebas independientes) **no fue modificado**. Sin credenciales en el repositorio.
+- Último total reportado: **134 pruebas** aprobadas en nueve archivos; compilación
+  y typecheck correctos.
+- **Sprint 1 cerrado:** S6-C (migración 002 aplicada) y S6-D (validación funcional
+  de `admin_set_profile_access`: HTTP 204 al activar y restaurar un usuario de
+  prueba). **Migraciones 001, 002 y 003 aplicadas** en PigTecBD.
+- **Sprint 2:** API de **áreas** (`/areas`) y **corrales** (`/pens`) con RBAC y
+  RLS (migración `003_areas_pens_rls.sql`). Lectura para roles operativos activos;
+  escritura y baja lógica solo admin/manager activos; sin acceso anónimo.
+- La aplicación en Supabase de 001, 002 y 003 la realizó el responsable en el SQL
+  Editor; el asistente no se conecta a Supabase. Sin credenciales en el repositorio.
 
 ## Reglas de negocio esenciales
 - Una sola granja: KolkaPig.
@@ -33,7 +41,11 @@ Windows: `C:\Users\ACER\Desktop\UNAMBA\Fercyt\VET\PigTec` (confirmar en el equip
 - Autenticación ≠ autorización: consultar rol/activo desde fuente confiable, aplicar backend + RLS.
 
 ## Próximo trabajo
-S6-B completada: migración 001 aplicada y estructura verificada en PigTecBD (desarrollo). **Siguiente: S6-C** — aprovisionamiento de perfiles (rol explícito, sin `viewer` por defecto), diseño de **políticas RLS operativas**, pruebas **funcionales** de triggers/vista/índice de aretes/CHECK de origen con datos sintéticos, y conexión del backend a PigTecBD para validar `GET /auth/profile`. El RBAC sigue sin conectarse a rutas operativas (áreas, corrales, animales, solicitudes). **No crear la migración 002 ni ejecutar SQL sin aprobación.**
+Sprint 2 en curso: API de áreas y corrales implementada y con RLS aplicada
+(migración 003). Siguiente: validar `/areas` y `/pens` de extremo a extremo
+contra PigTecBD con un administrador real (lectura y escritura), y continuar con
+animales, movimientos y salud. **No crear la migración 004 ni ejecutar SQL sin
+aprobación.**
 
 ## Verificaciones para reiniciar
 ```bash

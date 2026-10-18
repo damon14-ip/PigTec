@@ -5,6 +5,9 @@ import {
   createSupabaseProfileRepository,
   type SupabaseProfileClient,
 } from './modules/auth/profile-repository.js';
+import { createSupabaseAreaRepository } from './modules/areas/areas.repository.js';
+import { createSupabasePenRepository } from './modules/pens/pens.repository.js';
+import type { PostgrestClient } from './modules/common/postgrest.js';
 import { createSupabaseClient } from './supabase/client.js';
 
 /**
@@ -43,7 +46,21 @@ const profileRepository = createSupabaseProfileRepository((accessToken) =>
   createSupabaseClient(env, { accessToken }) as unknown as SupabaseProfileClient,
 );
 
-const app = buildApp({ tokenVerifier, profileRepository });
+// Repositorios de datos operativos (areas y corrales): mismo criterio que los
+// perfiles, un cliente NUEVO por solicitud con el JWT verificado (RLS con la
+// identidad del usuario). Nunca se usa `service_role`.
+const dataClient = (accessToken: string): PostgrestClient =>
+  createSupabaseClient(env, { accessToken }) as unknown as PostgrestClient;
+
+const areaRepository = createSupabaseAreaRepository(dataClient);
+const penRepository = createSupabasePenRepository(dataClient);
+
+const app = buildApp({
+  tokenVerifier,
+  profileRepository,
+  areaRepository,
+  penRepository,
+});
 
 try {
   await app.listen({ port: env.PORT, host: env.HOST });

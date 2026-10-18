@@ -9,6 +9,16 @@ import {
   createRejectingProfileRepository,
   type ProfileRepository,
 } from './modules/auth/profile-repository.js';
+import {
+  createRejectingAreaRepository,
+  type AreaRepository,
+} from './modules/areas/areas.repository.js';
+import { areaRoutes } from './modules/areas/areas.routes.js';
+import {
+  createRejectingPenRepository,
+  type PenRepository,
+} from './modules/pens/pens.repository.js';
+import { penRoutes } from './modules/pens/pens.routes.js';
 
 export interface BuildAppOptions {
   logger?: boolean;
@@ -24,6 +34,16 @@ export interface BuildAppOptions {
    * requieren rol responden 503 en lugar de autorizar.
    */
   profileRepository?: ProfileRepository;
+  /**
+   * Repositorio de areas. Si se omite, se usa uno fail-closed (responde 503).
+   * Inyectable para pruebas sin red.
+   */
+  areaRepository?: AreaRepository;
+  /**
+   * Repositorio de corrales. Si se omite, se usa uno fail-closed (503).
+   * Inyectable para pruebas sin red.
+   */
+  penRepository?: PenRepository;
 }
 
 /**
@@ -38,9 +58,22 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const tokenVerifier = options.tokenVerifier ?? createRejectingTokenVerifier();
   const profileRepository =
     options.profileRepository ?? createRejectingProfileRepository();
+  const areaRepository =
+    options.areaRepository ?? createRejectingAreaRepository();
+  const penRepository = options.penRepository ?? createRejectingPenRepository();
 
   app.register(healthRoutes);
   app.register(authRoutes, { verifier: tokenVerifier, profileRepository });
+  app.register(areaRoutes, {
+    verifier: tokenVerifier,
+    profileRepository,
+    areaRepository,
+  });
+  app.register(penRoutes, {
+    verifier: tokenVerifier,
+    profileRepository,
+    penRepository,
+  });
 
   return app;
 }
