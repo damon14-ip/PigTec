@@ -26,6 +26,15 @@ PigTec permitirá registrar e identificar porcinos, ubicarlos por área y corral
 
 **Fuera del MVP inicial:** multi-granja, pagos, gestión compleja de insumos, sensores físicos, automatización predictiva, IA que modifique datos, aplicaciones móviles nativas. Un asistente de IA de consulta, si se incorpora, será posterior y de **solo lectura**.
 
+### Módulo "Reportes y análisis" (alcance aprobado)
+
+- **Excel integral (`.xlsx`)**: libro con hojas separadas para resumen, porcinos, movimientos, camadas, sanidad, áreas y corrales, y estadísticas, según los datos realmente disponibles.
+- **Documentos PDF**: modernizan **moderadamente** los formatos originales de KolkaPig, conservando su identidad documental, los códigos `KPG-RG` cuando correspondan, los nombres de campos, la organización familiar y la finalidad operativa. La prioridad es que un trabajador acostumbrado a los formatos anteriores reconozca y utilice los nuevos sin dificultad.
+- Se distinguen los **PDF operativos** de los **informes gerenciales**.
+- Los reportes **respetan permisos y filtros**; no inventan información ni exportan datos no autorizados.
+- El **dashboard** usa gráficos con datos reales: estados de porcinos, ocupación de corrales y movimientos por periodo; posteriormente, indicadores reproductivos y sanitarios.
+- **Fuera del alcance actual:** inventarios de alimentos, medicamentos y suministros (formatos de referencia `KPG-RG-09` y `KPG-RG-10`).
+
 ## 2. Entorno y tecnologías
 
 | Capa | Tecnología / decisión |
@@ -297,6 +306,10 @@ Riesgos que requieren pruebas antes de uso: consistencia de movimientos con esta
 | D-09 | No eliminar historial de animales, movimientos, camadas ni sanidad | Aprobada |
 | D-10 | Datos sintéticos permitidos para pruebas, claramente identificados | Aprobada |
 | D-11 | Migraciones solo tras respaldo, pruebas y autorización | Aprobada |
+| D-12 | Módulo "Reportes y análisis": Excel integral y documentos PDF que modernizan los formatos KolkaPig conservando identidad, códigos KPG-RG y nombres de campos | Aprobada |
+| D-13 | Separar PDF operativos de informes gerenciales | Aprobada |
+| D-14 | Dashboard y reportes con datos reales; respetan permisos y filtros y no inventan información | Aprobada |
+| D-15 | Inventarios de alimentos, medicamentos y suministros fuera del alcance actual | Aprobada |
 
 ---
 
