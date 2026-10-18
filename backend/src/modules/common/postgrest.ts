@@ -18,6 +18,21 @@ export interface PostgrestErrorLike {
 export interface PostgrestResult<T> {
   data: T | null;
   error: PostgrestErrorLike | null;
+  /**
+   * Numero total de filas que cumplen el filtro, cuando la consulta lo pide con
+   * `select(columnas, { count: 'exact', head: true })`. `null`/ausente en el
+   * resto de consultas. Permite contar sin descargar las filas.
+   */
+  count?: number | null;
+}
+
+/**
+ * Opciones de `select`. `count`/`head` permiten pedir solo el conteo exacto de
+ * filas que cumplen el filtro, sin traerlas: ideal para resumenes agregados.
+ */
+export interface PostgrestSelectOptions {
+  count?: 'exact';
+  head?: boolean;
 }
 
 /**
@@ -25,12 +40,19 @@ export interface PostgrestResult<T> {
  * filas; `single`/`maybeSingle` devuelven una sola fila.
  */
 export interface PostgrestQuery<T> extends PromiseLike<PostgrestResult<T[]>> {
-  select(columns?: string): PostgrestQuery<T>;
+  select(columns?: string, options?: PostgrestSelectOptions): PostgrestQuery<T>;
   insert(values: Record<string, unknown>): PostgrestQuery<T>;
   update(values: Record<string, unknown>): PostgrestQuery<T>;
   eq(column: string, value: unknown): PostgrestQuery<T>;
+  /** Comparaciones de rango (p. ej. filtros de fecha en movimientos). */
+  gte(column: string, value: unknown): PostgrestQuery<T>;
+  lte(column: string, value: unknown): PostgrestQuery<T>;
+  /** Filtro logico OR de PostgREST (p. ej. busqueda por codigo o arete). */
+  or(filter: string): PostgrestQuery<T>;
   order(column: string, options?: { ascending?: boolean }): PostgrestQuery<T>;
   limit(count: number): PostgrestQuery<T>;
+  /** Paginacion por posicion (equivale al encabezado Range de PostgREST). */
+  range(from: number, to: number): PostgrestQuery<T>;
   maybeSingle(): PromiseLike<PostgrestResult<T>>;
   single(): PromiseLike<PostgrestResult<T>>;
 }

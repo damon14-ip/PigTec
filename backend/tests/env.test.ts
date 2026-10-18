@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadDotEnv, parseEnv } from '../src/config/env.js';
+import { DEFAULT_CORS_ALLOWED_ORIGINS } from '../src/config/cors.js';
 
 const VALID_ENV = {
   PORT: '4000',
@@ -17,6 +18,7 @@ describe('parseEnv', () => {
       HOST: '0.0.0.0',
       SUPABASE_URL: 'https://example.supabase.co',
       SUPABASE_ANON_KEY: 'public-anon-key-placeholder',
+      CORS_ALLOWED_ORIGINS: 'http://127.0.0.1:5173',
     });
   });
 
@@ -121,6 +123,67 @@ describe('parseEnv: SUPABASE_URL debe tener un hostname valido', () => {
     expect(() =>
       parseEnv({ ...VALID_ENV, SUPABASE_URL: 'https://-malo.supabase.co' }),
     ).toThrowError(/SUPABASE_URL/);
+  });
+});
+
+describe('parseEnv: CORS_ALLOWED_ORIGINS', () => {
+  it('usa el origen de desarrollo por defecto cuando no se configura', () => {
+    const env = parseEnv({ ...VALID_ENV });
+
+    expect(env.CORS_ALLOWED_ORIGINS).toBe(DEFAULT_CORS_ALLOWED_ORIGINS);
+    expect(env.CORS_ALLOWED_ORIGINS).toBe('http://127.0.0.1:5173');
+  });
+
+  it('acepta una lista de origenes separados por comas', () => {
+    const env = parseEnv({
+      ...VALID_ENV,
+      CORS_ALLOWED_ORIGINS: 'https://app.example.com, http://127.0.0.1:5173',
+    });
+
+    expect(env.CORS_ALLOWED_ORIGINS).toBe(
+      'https://app.example.com, http://127.0.0.1:5173',
+    );
+  });
+
+  it('rechaza el comodin "*"', () => {
+    expect(() =>
+      parseEnv({ ...VALID_ENV, CORS_ALLOWED_ORIGINS: '*' }),
+    ).toThrowError(/CORS_ALLOWED_ORIGINS/);
+  });
+
+  it('rechaza un origen con ruta', () => {
+    expect(() =>
+      parseEnv({
+        ...VALID_ENV,
+        CORS_ALLOWED_ORIGINS: 'http://127.0.0.1:5173/app',
+      }),
+    ).toThrowError(/CORS_ALLOWED_ORIGINS/);
+  });
+
+  it('rechaza un origen sin protocolo http/https', () => {
+    expect(() =>
+      parseEnv({ ...VALID_ENV, CORS_ALLOWED_ORIGINS: 'ftp://127.0.0.1:5173' }),
+    ).toThrowError(/CORS_ALLOWED_ORIGINS/);
+  });
+
+  it('rechaza una lista vacia', () => {
+    expect(() =>
+      parseEnv({ ...VALID_ENV, CORS_ALLOWED_ORIGINS: '   ' }),
+    ).toThrowError(/CORS_ALLOWED_ORIGINS/);
+  });
+
+  it('no filtra el valor invalido en el mensaje de error', () => {
+    const valorInvalido = 'origen-raro-con-secreto';
+
+    let message = '';
+    try {
+      parseEnv({ ...VALID_ENV, CORS_ALLOWED_ORIGINS: valorInvalido });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    expect(message).toContain('CORS_ALLOWED_ORIGINS');
+    expect(message).not.toContain(valorInvalido);
   });
 });
 

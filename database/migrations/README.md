@@ -535,20 +535,52 @@ COMMIT;
 - La clave de bloqueo global (`pg_advisory_xact_lock`) se libera sola al terminar
   las transacciones; no requiere limpieza.
 
-## Reservado para migraciones posteriores (003+)
+## Reservado para migraciones posteriores
 
-| Migración propuesta | Contenido | Motivo |
+| Migración | Contenido | Estado |
 |---|---|---|
-| 003 | **Políticas RLS operativas** por rol + privilegios de columna; ajuste definitivo de privilegios de la vista. | Requiere diseño y pruebas por acción, no solo por tabla. |
-| 004 | Revisión adicional de la vista y de `set_updated_at` (`search_path`). | Endurecimiento. |
-| 005 | **Endurecer `apply_animal_movement` / `apply_mortality_event`**: `search_path`, coherencia de estado, bloqueo de movimientos tras venta/muerte/salida, idempotencia. | Reglas de negocio sensibles. |
-| 006 | Tabla `animal_registration_requests` + generación segura de `animal_code` (`PIG-000001` con secuencia). | Flujo funcional aún sin implementar. |
+| 003 | Políticas RLS de `areas`/`pens`. | Aplicada en PigTecBD (6 políticas verificadas). |
+| 004 | Políticas RLS de `animals` (SELECT operativo; INSERT/UPDATE admin/manager). | Aplicada en PigTecBD. |
+| 005 | Endurecimiento de `apply_animal_movement`/`apply_mortality_event` (SECURITY DEFINER, coherencia de estado, ubicación y destino; inmutabilidad del historial; guardia de columnas derivadas de `animals`; RLS de `animal_movements`). | Aplicada en PigTecBD (triggers `trg_animal_movements_immutable` y `trg_animals_derived_guard` confirmados). |
+| 006 | Políticas RLS de `litters` (camadas): SELECT operativo; INSERT/UPDATE admin/manager/operator; sin DELETE. | **Mecanismos presentes en PigTecBD** (ver más abajo). |
+| 007 | Políticas RLS de `health_events` (sanidad): SELECT operativo; INSERT admin/manager/operator/veterinarian; sin UPDATE/DELETE. | **Mecanismos presentes en PigTecBD** (ver más abajo). |
+| 008 | Generación de `animals.animal_code`: secuencia `public.animals_animal_code_seq`, función `assign_animal_code()` (SECURITY DEFINER) y trigger `trg_animals_assign_code`. | **Mecanismos presentes en PigTecBD** (ver más abajo). |
+
+### Verificación de presencia de los mecanismos de 006/007/008 (S6-A.2)
+
+En **S6-A.2** se confirmó, ejecutando **una sola vez** el verificador de **solo
+lectura** `database/verification/s6a1_readonly_migrations_check.sql` en el SQL
+Editor de **PigTecBD** (PostgreSQL 17.11), que los **mecanismos** de 006, 007 y
+008 **están presentes** en la base de datos:
+
+- **006:** políticas `litters_select_operational`, `litters_insert_operational`
+  y `litters_update_operational`, con RLS activado en `litters` y privilegios
+  `SELECT`/`INSERT`/`UPDATE` para `authenticated` (sin `DELETE`).
+- **007:** políticas `health_events_select_operational` y
+  `health_events_insert_operational`, con RLS activado en `health_events` y
+  privilegios `SELECT`/`INSERT` para `authenticated` (sin `UPDATE`/`DELETE`).
+- **008:** secuencia `public.animals_animal_code_seq`, función
+  `assign_animal_code()` y trigger `trg_animals_assign_code`.
+
+> **Alcance:** esto constata **presencia**, no una nueva ejecución. Las
+> migraciones 006/007/008 **no se volvieron a aplicar** en S6-A.2 y no se
+> ejecutó DDL ni DML. La única diferencia que marcó el verificador fue de
+> **diseño**: `authenticated` **no** tiene `UPDATE` de tabla completa sobre
+> `animals`, sino `UPDATE` **por columna** en las columnas editables (005); por
+> eso **no** procede ningún `GRANT UPDATE` general.
+
+Módulo aún sin migración dedicada: el flujo de solicitudes
+`animal_registration_requests` (alta solicitada por `operator`), todavía sin
+implementar. `health_events` (sanidad) queda cubierto por 007 y la generación de
+`animal_code` por 008.
 
 Correcciones pendientes de evaluar (con datos reales o con aprobación):
 
 - `health_events.documented_by` (hoy `TEXT`): revisar si debe ser FK a `profiles`.
 - `animals.animal_code`: evaluar CHECK de formato (`PIG-` + dígitos) si la
   generación queda en base de datos.
+- `litters`: no tiene columna de autor; evaluar auditoría si se requiere
+  trazabilidad de quién registró cada camada.
 
 ## Estrategia de verificación
 
@@ -668,5 +700,25 @@ Corregir el script y volver a ejecutar desde una base limpia.
   **6 políticas RLS** (3 en `areas`, 3 en `pens`). Habilita `SELECT` para roles
   operativos activos e `INSERT`/`UPDATE` para admin/manager activos; sin `DELETE`
   y sin acceso anónimo.
-- La aplicación en Supabase de 001, 002 y 003 la realizó el responsable del
-  proyecto en el SQL Editor; el asistente no se conecta a Supabase ni ejecuta SQL.
+- `004_animals_rls.sql`: **ejecutada** en PigTecBD. `SELECT` para roles operativos
+  activos; `INSERT`/`UPDATE` para admin/manager activos; sin `DELETE`.
+- `005_movements_integrity_rls.sql`: **ejecutada** en PigTecBD; **triggers
+  confirmados** (`trg_animal_movements_immutable`, `trg_animals_derived_guard`) y
+  funciones de deriva en `SECURITY DEFINER`. RLS de `animal_movements`: `SELECT`
+  operativo e `INSERT` por motivo/rol; historial inmutable.
+- `006_litters_rls.sql`: **mecanismos presentes en PigTecBD** (presencia
+  confirmada en S6-A.2 con el verificador de solo lectura; **no** re-ejecutada).
+  RLS de `litters` (camadas): `SELECT` operativo e `INSERT`/`UPDATE`
+  admin/manager/operator; sin `DELETE`.
+- `007_health_events_rls.sql`: **mecanismos presentes en PigTecBD** (presencia
+  confirmada en S6-A.2 con el verificador de solo lectura; **no** re-ejecutada).
+  RLS de `health_events` (sanidad): `SELECT` operativo e `INSERT`
+  admin/manager/operator/veterinarian; sin `UPDATE`/`DELETE`.
+- `008_animal_code_generation.sql`: **mecanismos presentes en PigTecBD**
+  (presencia confirmada en S6-A.2 con el verificador de solo lectura; **no**
+  re-ejecutada). Secuencia `public.animals_animal_code_seq`, función
+  `assign_animal_code()` y trigger `trg_animals_assign_code`.
+- La aplicación en Supabase de 001–008 la realizó el responsable del proyecto en
+  el SQL Editor; el asistente no se conecta a Supabase ni ejecuta SQL. En S6-A.2
+  solo se **leyó** el catálogo con un script de solo lectura para constatar la
+  presencia de los mecanismos.

@@ -31,6 +31,28 @@ export class ForeignKeyError extends Error {
   }
 }
 
+/**
+ * Entrada invalida detectada en la capa de negocio (no en el esquema de
+ * validacion). Se traduce a HTTP 400.
+ */
+export class ValidationError extends Error {
+  constructor(message = 'datos invalidos') {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+/**
+ * Operacion permitida por rol general, pero denegada para la accion concreta
+ * (p. ej. un `operator` intentando autorizar una venta). Se traduce a HTTP 403.
+ */
+export class ForbiddenError extends Error {
+  constructor(message = 'operacion no autorizada') {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
 /** Fallo de infraestructura o acceso no disponible. */
 export class DataAccessError extends Error {
   constructor() {
@@ -44,6 +66,7 @@ export class DataAccessError extends Error {
  *
  * - `23505` unique_violation        -> ConflictError (409)
  * - `23503` foreign_key_violation   -> ForeignKeyError (422)
+ * - `23514` check_violation         -> ValidationError (400)
  * - cualquier otro (red, RLS, etc.) -> DataAccessError (503)
  */
 export function toDataError(error: unknown): Error {
@@ -54,6 +77,11 @@ export function toDataError(error: unknown): Error {
   }
   if (code === '23503') {
     return new ForeignKeyError();
+  }
+  if (code === '23514') {
+    // Violacion de una regla de integridad del esquema o de un trigger de
+    // negocio; se traduce a entrada invalida para no ocultarla como 503.
+    return new ValidationError();
   }
 
   return new DataAccessError();

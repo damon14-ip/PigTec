@@ -1,8 +1,10 @@
 import type { FastifyReply } from 'fastify';
 import {
   ConflictError,
+  ForbiddenError,
   ForeignKeyError,
   NotFoundError,
+  ValidationError,
 } from './data-errors.js';
 
 /**
@@ -20,6 +22,12 @@ export function sendDomainError(reply: FastifyReply, error: unknown): FastifyRep
   }
   if (error instanceof ForeignKeyError) {
     return reply.code(422).send({ error: 'invalid_reference' });
+  }
+  if (error instanceof ValidationError) {
+    return reply.code(400).send({ error: 'invalid_request' });
+  }
+  if (error instanceof ForbiddenError) {
+    return reply.code(403).send({ error: 'forbidden' });
   }
 
   return reply.code(503).send({ error: 'service_unavailable' });

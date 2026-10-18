@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  CORS_ALLOWED_ORIGINS_MESSAGE,
+  DEFAULT_CORS_ALLOWED_ORIGINS,
+  isValidOriginList,
+} from './cors.js';
 
 /**
  * Reglas de un hostname valido (RFC 1123, simplificado):
@@ -54,6 +59,15 @@ const envSchema = z.object({
       message: 'debe ser una URL HTTPS con un hostname valido',
     }),
   SUPABASE_ANON_KEY: z.string().min(1),
+  /**
+   * Origenes permitidos para CORS (lista separada por comas). Por defecto solo
+   * el origen de desarrollo del frontend; en produccion debe fijarse
+   * explicitamente. Se rechaza el comodin `*` y cualquier valor no valido.
+   */
+  CORS_ALLOWED_ORIGINS: z
+    .string()
+    .default(DEFAULT_CORS_ALLOWED_ORIGINS)
+    .refine(isValidOriginList, { message: CORS_ALLOWED_ORIGINS_MESSAGE }),
 });
 
 export type Env = z.infer<typeof envSchema>;
